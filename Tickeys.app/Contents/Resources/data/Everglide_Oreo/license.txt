@@ -1,0 +1,37 @@
+Sound pack: Everglide Oreo
+========================================
+
+Source
+------
+Mechvibes soundpack `eg-oreo`
+  https://github.com/hainguyents13/mechvibes  (MIT License, Copyright (c) 2021 Hai Nguyen)
+Per-key slices of that pack taken from
+  https://github.com/diogo7dias/omaclack      (MIT License)
+  path: sounds/eg-oreo/
+
+The upstream Mechvibes pack ships a single continuous typing recording
+(`sound.ogg`); the per-key files above are a community slicing of it.
+
+License
+-------
+MIT. Compatible with this repository's MIT license.
+Unlike the older packs in this directory (bubble / mechanical / drum),
+no CC-BY-NC material is involved.
+
+Files
+-----
+1.wav .. 8.wav   eight ordinary key samples
+space.wav        real spacebar recording  (Windows VK 32 -> macOS keycode 49)
+enter.wav        real return recording    (Windows VK 13 -> macOS keycode 36)
+backspace.wav    real backspace recording (Windows VK  8 -> macOS keycode 51)
+
+Processing applied
+------------------
+1. decoded to mono / 44100 Hz / 16-bit PCM (canonical RIFF, fmt + data only)
+2. leading and trailing silence trimmed, so a keystroke fires immediately
+3. the 8 generic keys chosen are those whose peak was closest to the pack median
+   (VK 68/69/70/75/76/77/83/87 = D E F K L M S W)
+4. every one of the 11 files level-matched to -25 dBFS RMS,
+   clamped to a -0.5 dBFS peak ceiling so nothing clips.
+   This step is required: raw per-key levels in the source differ by over 20 dB
+   (backspace pinned near 0 dBFS, enter around -22 dBFS).

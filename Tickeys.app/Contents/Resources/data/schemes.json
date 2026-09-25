@@ -53,6 +53,30 @@
 		"files": ["1.wav", "2.wav", "3.wav", "4.wav", "space.wav", "backspace.wav", "enter.wav"],
 		"non_unique_count": 4,
 		"key_audio_map":{"36": 6, "49": 4, "51": 5}
+	},
+
+	{
+		"name": "Topre",
+		"display_name": "Topre",
+		"files": ["1.wav", "2.wav", "3.wav", "4.wav", "5.wav", "6.wav", "7.wav", "8.wav", "space.wav", "enter.wav", "backspace.wav"],
+		"non_unique_count": 8,
+		"key_audio_map":{"36": 9, "49": 8, "51": 10}
+	},
+
+	{
+		"name": "NK_Cream",
+		"display_name": "NK Cream",
+		"files": ["1.wav", "2.wav", "3.wav", "4.wav", "5.wav", "6.wav", "7.wav", "8.wav", "space.wav", "enter.wav", "backspace.wav"],
+		"non_unique_count": 8,
+		"key_audio_map":{"36": 9, "49": 8, "51": 10}
+	},
+
+	{
+		"name": "Everglide_Oreo",
+		"display_name": "Everglide Oreo",
+		"files": ["1.wav", "2.wav", "3.wav", "4.wav", "5.wav", "6.wav", "7.wav", "8.wav", "space.wav", "enter.wav", "backspace.wav"],
+		"non_unique_count": 8,
+		"key_audio_map":{"36": 9, "49": 8, "51": 10}
 	}
 
 ]

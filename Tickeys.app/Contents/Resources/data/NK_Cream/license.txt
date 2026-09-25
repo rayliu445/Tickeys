@@ -1,0 +1,33 @@
+Sound pack: NK Cream (NovelKeys Cream)
+========================================
+
+Source
+------
+Mechvibes soundpack `nk-cream`
+  https://github.com/hainguyents13/mechvibes  (MIT License, Copyright (c) 2021 Hai Nguyen)
+  path: src/audio/nk-cream/
+
+This pack ships 35 individual per-key WAV files, so no slicing was involved
+and there are no slicing artefacts to filter out.
+
+License
+-------
+MIT. Compatible with this repository's MIT license.
+Unlike the older packs in this directory (bubble / mechanical / drum),
+no CC-BY-NC material is involved.
+
+Files
+-----
+1.wav .. 8.wav   eight ordinary key samples  (from e g i n r s t u)
+space.wav        upstream space.wav
+enter.wav        upstream enter.wav
+backspace.wav    upstream backspace.wav
+
+Processing applied
+------------------
+1. decoded to mono / 44100 Hz / 16-bit PCM (canonical RIFF, fmt + data only)
+2. leading and trailing silence trimmed, so a keystroke fires immediately
+3. the 8 generic keys chosen are those whose peak was closest to the pack median
+4. every one of the 11 files level-matched to -25 dBFS RMS,
+   clamped to a -0.5 dBFS peak ceiling so nothing clips.
+   This step is required: raw per-key levels in the source differ by over 10 dB.
