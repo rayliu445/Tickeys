@@ -1,80 +1,90 @@
-use cocoa::base::{class,id,nil};
-use cocoa::foundation::NSString;
-use tickeys::AudioScheme;
-use cocoa_util::*;
+//! User preferences stored in NSUserDefaults.
 
+use objc2::msg_send;
+use objc2::rc::Retained;
+use objc2_foundation::{NSString, NSUserDefaults};
 
-pub struct Pref
-{
-	pub scheme: String,
-	pub volume: f32,
-	pub pitch: f32,
+use crate::cocoa_util;
+use crate::tickeys::AudioScheme;
+
+pub struct Pref {
+    pub scheme: String,
+    pub volume: f32,
+    pub pitch: f32,
 }
 
-impl Pref
-{
-	pub fn load(schemes: &Vec<AudioScheme>) -> Pref
-	{
-		unsafe
-		{
-			let user_defaults: id = msg_send![class("NSUserDefaults"), standardUserDefaults];
-			let pref_exists_key:id = NSString::alloc(nil).init_str("pref_exists");
+impl Pref {
+    pub fn load(schemes: &[AudioScheme]) -> Pref {
+        let defaults = NSUserDefaults::standardUserDefaults();
+        let default = Pref {
+            scheme: schemes[0].name.clone(),
+            volume: 0.5,
+            pitch: 1.0,
+        };
 
-			let pref = Pref{scheme: schemes[0].name.clone(), volume: 0.5f32, pitch: 1.0f32};
+        let pref_exists: Option<Retained<NSString>> = unsafe {
+            let key = cocoa_util::nsstr("pref_exists");
+            msg_send![&defaults, stringForKey: &*key]
+        };
+        if pref_exists.is_none() {
+            // first run
+            let p = default.clone_pref();
+            p.save();
+            return p;
+        }
 
-			let pref_exists: id = msg_send![user_defaults, stringForKey: pref_exists_key];
-			if pref_exists == nil //first run
-			{
-				pref.save();
-				return pref;
-			}else
-			{
-				let audio_scheme: id = msg_send![user_defaults,
-					stringForKey: NSString::alloc(nil).init_str("audio_scheme")];
+        let audio_scheme: Option<Retained<NSString>> = unsafe {
+            let key = cocoa_util::nsstr("audio_scheme");
+            msg_send![&defaults, stringForKey: &*key]
+        };
+        let volume: f32 = unsafe {
+            let key = cocoa_util::nsstr("volume");
+            msg_send![&defaults, floatForKey: &*key]
+        };
+        let pitch: f32 = unsafe {
+            let key = cocoa_util::nsstr("pitch");
+            msg_send![&defaults, floatForKey: &*key]
+        };
 
-				let volume: f32 = msg_send![user_defaults,
-					floatForKey: NSString::alloc(nil).init_str("volume")];
+        let mut scheme_str = audio_scheme
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| default.scheme.clone());
 
-				let pitch: f32 = msg_send![user_defaults,
-					floatForKey: NSString::alloc(nil).init_str("pitch")];
+        // validate scheme
+        if !schemes.iter().any(|s| s.name == scheme_str) {
+            scheme_str = default.scheme;
+        }
 
-				let mut scheme_str = nsstring_to_string(audio_scheme);
+        Pref {
+            scheme: scheme_str,
+            volume,
+            pitch,
+        }
+    }
 
-				//validate scheme
-				if schemes.iter().filter(|s|{*s.name == scheme_str}).count() == 0
-				{
-					scheme_str = pref.scheme;
-				}
+    fn clone_pref(&self) -> Pref {
+        Pref {
+            scheme: self.scheme.clone(),
+            volume: self.volume,
+            pitch: self.pitch,
+        }
+    }
 
-				Pref{scheme:  scheme_str, volume: volume, pitch: pitch}
-			}
-		}
+    pub fn save(&self) {
+        let defaults = NSUserDefaults::standardUserDefaults();
+        unsafe {
+            let scheme = cocoa_util::nsstr(&self.scheme);
+            let audio_scheme_key = cocoa_util::nsstr("audio_scheme");
+            let _: () = msg_send![&defaults, setObject: &*scheme, forKey: &*audio_scheme_key];
 
-	}
+            let volume_key = cocoa_util::nsstr("volume");
+            let _: () = msg_send![&defaults, setFloat: self.volume, forKey: &*volume_key];
 
-	pub fn save(&self)
-	{
-		unsafe
-		{
-			let user_defaults: id = msg_send![class("NSUserDefaults"), standardUserDefaults];
+            let pitch_key = cocoa_util::nsstr("pitch");
+            let _: () = msg_send![&defaults, setFloat: self.pitch, forKey: &*pitch_key];
 
-			let _:id = msg_send![user_defaults,
-				setObject: NSString::alloc(nil).init_str(&self.scheme)
-				forKey: NSString::alloc(nil).init_str("audio_scheme")];
-
-			let _:id = msg_send![user_defaults,
-				setFloat: self.volume
-				forKey: NSString::alloc(nil).init_str("volume")];
-
-			let _:id = msg_send![user_defaults,
-				setFloat: self.pitch forKey: NSString::alloc(nil).init_str("pitch")];
-
-			let pref_exists_key:id = NSString::alloc(nil).init_str("pref_exists");
-			let _:id = msg_send![user_defaults, setObject:pref_exists_key forKey: pref_exists_key];
-
-			let _:id = msg_send![user_defaults, synchronize];
-		}
-
-
-	}
+            let pref_exists_key = cocoa_util::nsstr("pref_exists");
+            let _: () = msg_send![&defaults, setObject: &*pref_exists_key, forKey: &*pref_exists_key];
+        }
+    }
 }

@@ -1,450 +1,219 @@
-extern crate libc;
-extern crate openal;
-extern crate cocoa;
-extern crate time;
-extern crate rustc_serialize;
-extern crate objc;
-extern crate std;
+//! Tickeys core: key event handling, sound scheme loading and playback.
 
-use std::collections::{VecDeque, BTreeMap};
-use std::option::Option;
-use std::io::Read;
-use std::string::String;
+use std::collections::{BTreeMap, VecDeque};
+use std::time::Instant;
 
-use libc::{c_void};
-use core_graphics::*;
-use openal::al::*;
-use openal::al::ffi::*;
-use alut::*;
-use objc::*;
+use serde::{Deserialize, Serialize};
 
-use event_tap;
+use crate::audio::AudioPlayers;
+use crate::event_tap::{self, KeyboardMonitor};
 
-#[derive(RustcDecodable, RustcEncodable, Clone)]
-pub struct AudioScheme
-{
-	pub name:String,
-	pub display_name: String,
-	pub files: Vec<String>,
-	pub non_unique_count: u8,
-	pub key_audio_map: BTreeMap<u8, u8>
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct AudioScheme {
+    pub name: String,
+    pub display_name: String,
+    pub files: Vec<String>,
+    pub non_unique_count: u8,
+    #[serde(rename = "key_audio_map")]
+    pub key_audio_map: BTreeMap<u8, u8>,
 }
 
-pub struct Tickeys
-{
-	volume:f32,
-	pitch:f32,
-	mute: bool,
+pub struct Tickeys {
+    volume: f32,
+    pitch: f32,
+    mute: bool,
 
-	audio_player: SimpleAudioPlayer,
-	keymap: BTreeMap<u8, u8>,
-	first_n_non_unique: i16,
+    audio_player: AudioPlayers,
+    keymap: BTreeMap<u8, u8>,
+    first_n_non_unique: i16,
 
-	last_keys: VecDeque<u8>,
+    last_keys: VecDeque<u8>,
 
-	keyboard_monitor: Option< event_tap::KeyboardMonitor>, //defered
+    keyboard_monitor: Option<KeyboardMonitor>,
 
-	on_keydown: Option<fn(sender:&Tickeys, key: u8)>,
+    on_keydown: Option<fn(sender: &Tickeys, key: u8)>,
 
-	schemes: Vec<AudioScheme>,
+    schemes: Vec<AudioScheme>,
 }
 
-impl Tickeys
-{
-	pub fn new(schemes: Vec<AudioScheme>) -> Tickeys
-	{
-		unsafe{alutInit(std::ptr::null_mut(), std::ptr::null_mut());}
+impl Tickeys {
+    pub fn new(schemes: Vec<AudioScheme>) -> Tickeys {
+        Tickeys {
+            volume: 1.0,
+            pitch: 1.0,
+            mute: false,
+            audio_player: AudioPlayers::new(3),
+            keymap: BTreeMap::new(),
+            first_n_non_unique: -1,
+            last_keys: VecDeque::with_capacity(8),
+            keyboard_monitor: None,
+            on_keydown: None,
+            schemes,
+        }
+    }
 
-		Tickeys
-		{
-			volume:1f32,
-			pitch:1f32,
-			mute: false,
-			audio_player: SimpleAudioPlayer::new(2),
-			keymap: BTreeMap::new(),
-			first_n_non_unique: -1,
-			last_keys: VecDeque::with_capacity(8),
-			keyboard_monitor:None,
-			on_keydown: Option::None,
-			schemes: schemes,
-		}
-	}
+    pub fn start(&mut self) {
+        let ptr_to_self: *mut std::os::raw::c_void = self as *mut Tickeys as *mut std::os::raw::c_void;
 
-	pub fn start(&mut self)
-	{
-		let tap;
-		let ptr_to_self: *mut c_void = unsafe{std::mem::transmute(self)};
+        let tap = match KeyboardMonitor::new(Self::handle_keyboard_event, ptr_to_self) {
+            Ok(t) => t,
+            Err(msg) => panic!("error: KeyboardMonitor::new: {}", msg),
+        };
 
-		unsafe
-		{
-			let tap_result = event_tap::KeyboardMonitor::new(Tickeys::handle_keyboard_event, ptr_to_self);
+        self.keyboard_monitor = Some(tap);
+    }
 
-			match tap_result
-			{
-				Ok(t) => tap = t,
-				Err(msg) => panic!("error: KeyboardMonitor::new: {}", msg)
-			}
+    #[allow(dead_code)]
+    pub fn stop(&mut self) {
+        self.keyboard_monitor = None;
+    }
 
-			let self_:&mut Tickeys = std::mem::transmute(ptr_to_self);
-			self_.keyboard_monitor = Some(tap);
-		}
-	}
+    pub fn get_schemes(&self) -> &Vec<AudioScheme> {
+        &self.schemes
+    }
 
-	pub fn stop(&mut self)
-	{
-		//TODO: stop the kbd monitor?
-	}
+    fn find_scheme(&self, name: &str) -> AudioScheme {
+        self.schemes
+            .iter()
+            .find(|s| s.name == name)
+            .cloned()
+            .unwrap_or_else(|| self.schemes[0].clone())
+    }
 
-	pub fn get_schemes(&self) -> &Vec<AudioScheme>
-	{
-		&self.schemes
-	}
+    pub fn load_scheme(&mut self, dir: &str, scheme_name: &str) {
+        let scheme = self.find_scheme(scheme_name);
 
-	fn find_scheme(&self, name: &str) -> AudioScheme
-	{
-		self.schemes.iter().filter(|s|{ *(s.name) == *name}).next().unwrap().clone()
-	}
+        let paths: Vec<String> = scheme
+            .files
+            .iter()
+            .map(|f| format!("{}/{}", dir, f))
+            .collect();
 
-	pub fn load_scheme(&mut self, dir: &str, scheme_name: &str)
-	{
-		let scheme = self.find_scheme(scheme_name);
-		let mut audio_data = Vec::with_capacity(scheme.files.len());
-		let mut path = dir.to_string() + "/";
-		let base_path_len = path.chars().count();
+        if let Err(e) = self.audio_player.load_files(&paths) {
+            // Do NOT panic here: a single broken sound pack must not take the
+            // whole app down (the old version panicked on load failures).
+            eprintln!("Tickeys: {}", e);
+            return;
+        }
+        self.audio_player.set_volume(self.volume);
+        self.audio_player.set_pitch(self.pitch);
 
-		for f in scheme.files.iter()
-		{
-			path.push_str(f);
-			println!("loading audio:{}", path);
-			let audio = AudioData::from_file(&path);
-			if audio.buffer == 0 as ALuint
-			{
-				panic!("failed to load audio file:{}", f);
-			}
-			path.truncate(base_path_len);
-			audio_data.push(audio);
-		}
+        self.keymap = scheme.key_audio_map.clone();
+        self.first_n_non_unique = scheme.non_unique_count as i16;
+    }
 
-		self.audio_player.load_data(audio_data);
-		self.audio_player.set_gain(self.volume);
-		self.audio_player.set_pitch(self.pitch);
+    pub fn set_volume(&mut self, volume: f32) {
+        if volume == self.volume {
+            return;
+        }
+        self.volume = volume;
+        self.audio_player.set_volume(volume);
+    }
 
-		self.keymap = scheme.key_audio_map.clone();
-		self.first_n_non_unique = scheme.non_unique_count as i16;
-	}
+    pub fn set_pitch(&mut self, pitch: f32) {
+        if pitch == self.pitch {
+            return;
+        }
+        self.pitch = pitch;
+        self.audio_player.set_pitch(pitch);
+    }
 
-	pub fn set_volume(&mut self, volume: f32)
-	{
-		if volume == self.volume {return;}
-		self.volume = volume;
-		self.audio_player.set_gain(volume);
-	}
+    pub fn set_mute(&mut self, mute: bool) {
+        self.mute = mute;
+    }
 
-	pub fn set_pitch(&mut self, pitch: f32)
-	{
-		if pitch == self.pitch {return;}
-		self.pitch = pitch;
-		self.audio_player.set_pitch(pitch);
-	}
+    #[allow(dead_code)]
+    pub fn get_volume(&self) -> f32 {
+        self.volume
+    }
 
-	pub fn set_mute(&mut self, mute: bool)
-	{
-		self.mute = mute;
-	}
+    #[allow(dead_code)]
+    pub fn get_pitch(&self) -> f32 {
+        self.pitch
+    }
 
-	#[allow(dead_code)]
-	pub fn get_volume(&self) -> f32
-	{
-		self.volume
-	}
+    pub fn get_last_keys(&self) -> &VecDeque<u8> {
+        &self.last_keys
+    }
 
-	#[allow(dead_code)]
-	pub fn get_pitch(&self) -> f32
-	{
-		self.pitch
-	}
+    /// Runs on the main run loop (the tap's source lives there). Must never
+    /// panic: a panic unwinding through CoreGraphics' C stack can wedge the
+    /// whole input system.
+    unsafe extern "C" fn handle_keyboard_event(
+        _proxy: *mut std::os::raw::c_void,
+        _event_type: u32,
+        event: event_tap::CGEventRef,
+        refcon: *mut std::os::raw::c_void,
+    ) -> event_tap::CGEventRef {
+        if refcon.is_null() {
+            return event;
+        }
+        let keycode = KeyboardMonitor::keycode_of_event(event);
+        let tickeys: &mut Tickeys = std::mem::transmute(refcon);
+        tickeys.handle_keydown(keycode as u8);
+        event
+    }
 
-	pub fn get_last_keys(&self) -> &VecDeque<u8>
-	{
-		&self.last_keys
-	}
+    fn handle_keydown(&mut self, keycode: u8) {
+        self.last_keys.push_back(keycode);
+        if self.last_keys.len() > 6 {
+            self.last_keys.pop_front();
+        }
 
-	#[allow(unused_variables)]
-	extern fn handle_keyboard_event(proxy: CGEventTapProxy, etype: CGEventType, event: CGEventRef, refcon: *mut c_void) -> CGEventRef
-	{
-		// 回调跑在 HID/会话级的事件路径上，这里绝对不能 panic ——
-		// panic 会 unwind 穿过 CoreGraphics 的 C 栈，可能让事件钩子卡死、
-		// 连带把整个系统的输入（包括鼠标焦点）拖住。一律提前返回。
-		if refcon == 0 as *mut c_void
-		{
-			return event;
-		}
-		let keycode = unsafe{CGEventGetIntegerValueField(event, CGEventField::kCGKeyboardEventKeycode)} as u16;
-		let tickeys: &mut Tickeys = unsafe{ std::mem::transmute(refcon)};
-		tickeys.handle_keydown(keycode as u8);
+        if let Some(f) = self.on_keydown {
+            f(self, keycode);
+        }
 
-		event
-	}
+        if self.mute {
+            return;
+        }
 
-	fn handle_keydown(&mut self, keycode: u8)
-	{
-		self.last_keys.push_back(keycode);
-		if self.last_keys.len() > 6  //todo: make the length configurable
-		{
-			self.last_keys.pop_front();
-		}
+        let index: i32 = match self.keymap.get(&keycode) {
+            Some(idx) => *idx as i32,
+            None => {
+                if self.first_n_non_unique <= 0 {
+                    -1
+                } else {
+                    (keycode % (self.first_n_non_unique as u8)) as i32
+                }
+            }
+        };
+        if self.is_too_frequent(keycode) {
+            return;
+        }
+        if index == -1 {
+            return;
+        }
 
-		self.on_keydown.map(|f| f(self, keycode));
+        self.audio_player.play(index as usize);
+    }
 
-		if self.mute 
-		{
-			return;
-		}
+    pub fn set_on_keydown(&mut self, on_keydown: Option<fn(sender: &Tickeys, key: u8)>) {
+        self.on_keydown = on_keydown;
+    }
 
-		let index:i32 = match self.keymap.get(&keycode)
-		{
-			Some(idx) => *idx as i32,
-			None =>
-			{
-				if self.first_n_non_unique <= 0 { -1 }
-				else { (keycode % (self.first_n_non_unique as u8)) as i32 }
-			}
-		};
-		if self.is_too_frequent(keycode){ return; }
-		if index == -1 { return; }
+    fn is_too_frequent(&self, keycode: u8) -> bool {
+        use std::sync::Mutex;
 
-		self.audio_player.play(index as usize);
-	}
+        static LAST: Mutex<(Option<Instant>, i16)> = Mutex::new((None, -1));
 
-	pub fn set_on_keydown(&mut self, on_keydown: Option<fn(sender:&Tickeys, key: u8)>)
-	{
-		self.on_keydown = on_keydown;
-	}
+        let mut last = LAST.lock().unwrap();
+        let now = Instant::now();
 
-	fn is_too_frequent(&self, keycode: u8) -> bool
-	{
-		unsafe
-		{
-			static mut last_time: u64 = 0;
-			static mut last_key: i16 = -1;
-			let now = time::precise_time_ns() / 1000 / 1000;
-
-			let delta = now - last_time ;
-
-			if delta < 120 && last_key == (keycode as i16)
-			{
-				last_time = now;
-				return true;
-			}
-			last_key = keycode as i16;
-			last_time = now;
-
-			return false;
-		}
-	}
+        if let Some(t) = last.0.as_ref() {
+            if t.elapsed().as_millis() < 120 && last.1 == keycode as i16 {
+                last.0 = Some(now);
+                return true;
+            }
+        }
+        last.0 = Some(now);
+        last.1 = keycode as i16;
+        false
+    }
 }
 
-impl Drop for Tickeys
-{
-	fn drop(&mut self)
-	{
-		println!("Tickeys::drop");
-	}
-}
-
-pub struct AudioData
-{
-	buffer: ALuint,
-}
-
-impl AudioData
-{
-	//todo: how to handle error?
-	pub fn from_file(file: &str) -> AudioData
-	{
-		// The CString must be bound to a named local, NOT written inline as
-		// `CString::new(file).unwrap().as_ptr()`: that makes the CString a temporary
-		// which is dropped at the end of the statement, so `file_ptr` would dangle.
-		// The allocator overwrites the first bytes of the freed chunk with free-list
-		// pointers, so ALUT receives a garbled path and fails with
-		// ALUT_ERROR_IO_ERROR (526) -- which is exactly why startup panicked with
-		// "failed to load file [526]" on the very first scheme.
-		let file_c = std::ffi::CString::new(file).unwrap();
-		let file_ptr = file_c.as_ptr();
-		let mut audio = AudioData{buffer:0};
-		unsafe
-		{
-			audio.buffer = alutCreateBufferFromFile(file_ptr);
-    		if audio.buffer == 0
-    		{
-    			panic!("failed to load file [{}]: {}", alutGetError() ,file);
-    		}
-		}
-
-		audio
-	}
-
-	pub fn id(&self) -> ALuint
-	{
-		self.buffer
-	}
-}
-
-impl Drop for AudioData
-{
-	fn drop(&mut self)
-	{
-		unsafe
-		{
-    		alDeleteBuffers(1, &self.buffer);
-		}
-	}
-}
-
-struct AudioSource
-{
-	id: ALuint,
-}
-
-impl AudioSource
-{
-	pub fn new() -> Option<AudioSource>
-	{
-		let mut id = 0;
-		unsafe{ alGenSources(1, &mut id); }
-
-		match unsafe { alGetError() }
-		{
-			AL_NO_ERROR => Some(AudioSource{id: id}),
-			_ => None
-		}
-	}
-
-	pub fn connect_to_buffer(&mut self, data: &AudioData)
-	{
-		self.stop();
-		unsafe
-		{
-			alSourcei(self.id, AL_BUFFER, data.id() as ALint);
-		}
-	}
-
-	pub fn disconnect_from_buffer(&mut self)
-	{
-		unsafe
-		{
-			alSourceStop(self.id);
-			alSourcei(self.id, AL_BUFFER, 0);
-		}
-	}
-
-	pub fn set_gain(&mut self, gain: f32)
-	{
-		unsafe{ alSourcef(self.id, AL_GAIN, gain); }
-	}
-
-	pub fn set_pitch(&mut self, pitch: f32)
-	{
-		unsafe{alSourcef(self.id, AL_PITCH, pitch);}
-	}
-
-	pub fn play(&mut self)
-	{
-		unsafe{ alSourcePlay(self.id); }
-	}
-
-	pub fn stop(&mut self)
-	{
-		unsafe{ alSourceStop(self.id); }
-	}
-
-	//pub fn state()
-}
-
-impl Drop for AudioSource
-{
-	fn drop(&mut self)
-	{
-		self.stop();
-		unsafe{ alDeleteSources(1, &self.id); }
-	}
-}
-
-struct SimpleAudioPlayer
-{
-	data: Vec<AudioData>,
-	source_cache: VecDeque<AudioSource>,
-	max_source_count: usize,
-}
-
-impl SimpleAudioPlayer
-{
-	pub fn new(max_source_count: usize) -> SimpleAudioPlayer
-	{
-		assert!(max_source_count > 0);
-
-		let mut sources = VecDeque::with_capacity(max_source_count);
-		for _ in 0..max_source_count
-		{
-			sources.push_back(AudioSource::new().unwrap());
-		}
-
-		SimpleAudioPlayer{data: Vec::new(), source_cache: sources, max_source_count: max_source_count}
-	}
-
-	pub fn load_data(&mut self, data: Vec<AudioData>)
-	{
-		for s in self.source_cache.iter_mut()
-		{
-			s.disconnect_from_buffer();
-		}
-
-		self.data = data;
-	}
-
-	pub fn set_gain(&mut self, gain: f32)
-	{
-		for s in self.source_cache.iter_mut()
-		{
-			s.set_gain(gain);
-		}
-	}
-
-	pub fn set_pitch(&mut self, pitch: f32)
-	{
-		for s in self.source_cache.iter_mut()
-		{
-			s.set_pitch(pitch);
-		}
-	}
-
-	pub fn play(&mut self, index: usize)
-	{
-		let data = match self.data.get(index)
-		{
-			Some(val) => val,
-			None => return
-		};
-
-		let mut oldest_source = self.source_cache.pop_front().unwrap();
-
-		oldest_source.connect_to_buffer(&data);
-		oldest_source.play();
-
-		self.source_cache.push_back(oldest_source);
-	}
-
-	pub fn unload_data(&mut self)
-	{
-		self.source_cache.clear();
-		self.data.clear();
-	}
-}
-
-impl Drop for SimpleAudioPlayer
-{
-	fn drop(&mut self)
-	{
-		self.unload_data();
-	}
+impl Drop for Tickeys {
+    fn drop(&mut self) {
+        println!("Tickeys::drop");
+    }
 }

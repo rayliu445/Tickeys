@@ -13,6 +13,45 @@ A demo for learning [Rust](https://www.rust-lang.org).
 - Windows: [Download](https://www.yingdev.com/Content/Projects/Tickeys_Win/Release/1.1.1/Tickeys1.1.1.rar)
 
 # Install
+
+## Build from source (this fork, 1.0.0+)
+
+Requirements: macOS, Rust (`brew install rust` or rustup). No Xcode needed.
+
+```sh
+# 1. one-time: create the local code-signing identity "Tickeys Local"
+scripts/setup-signing.sh
+
+# 2. build + assemble + sign  ->  build/Tickeys.app
+scripts/build.sh
+
+# 3. (optional) install straight to /Applications
+scripts/build.sh --install
+```
+
+Then launch `Tickeys.app`:
+
+1. A dialog asks you to enable Tickeys in
+   **System Settings → Privacy & Security → Accessibility**.
+   Tick it once, come back, click "继续".
+2. Done. The menu-bar icon appears; type anywhere to hear keys;
+   press `QAZ123` (or click the icon → Open Settings) for settings.
+
+### Why the signing dance?
+
+macOS ties the Accessibility authorization to the app's code signature.
+Unsigned or ad-hoc-signed apps get a *new* identity on every rebuild, so the
+permission grant is lost after each upgrade — the well-known
+"keeps asking for permission again" loop. Signing every build with the same
+local certificate ("Tickeys Local") gives the app a stable identity:
+you grant the permission **once**, and future rebuilds/upgrades never ask again.
+
+> Upgrading from the old ad-hoc builds (`com.yingDev.Tickeys.SwitchPacks`)?
+> Remove their stale permission entry with:
+> `tccutil reset Accessibility com.yingDev.Tickeys.SwitchPacks`
+
+## Original upstream install
+
   - brew cask
 ```sh
 brew cask install tickeys && open /Applications/Tickeys.app
