@@ -15,7 +15,7 @@ impl KeyboardMonitor
 	{
 		unsafe
 		{
-			let event_tap = CGEventTapCreate(CGEventTapLocation::kCGHIDEventTap, 
+			let event_tap = CGEventTapCreate(CGEventTapLocation::kCGSessionEventTap, 
 						CGEventTapPlacement::kCGHeadInsertEventTap, 
 						CGEventTapOptions::kCGEventTapOptionListenOnly,
 						CGEventMaskBit!(CGEventType::kCGEventKeyDown),

@@ -172,8 +172,14 @@ impl Tickeys
 	#[allow(unused_variables)]
 	extern fn handle_keyboard_event(proxy: CGEventTapProxy, etype: CGEventType, event: CGEventRef, refcon: *mut c_void) -> CGEventRef
 	{
+		// 回调跑在 HID/会话级的事件路径上，这里绝对不能 panic ——
+		// panic 会 unwind 穿过 CoreGraphics 的 C 栈，可能让事件钩子卡死、
+		// 连带把整个系统的输入（包括鼠标焦点）拖住。一律提前返回。
+		if refcon == 0 as *mut c_void
+		{
+			return event;
+		}
 		let keycode = unsafe{CGEventGetIntegerValueField(event, CGEventField::kCGKeyboardEventKeycode)} as u16;
-		assert!(refcon != 0 as *mut c_void);
 		let tickeys: &mut Tickeys = unsafe{ std::mem::transmute(refcon)};
 		tickeys.handle_keydown(keycode as u8);
 

@@ -138,6 +138,10 @@ trait AppDelegate // <NSApplicationDelegate>
 				decl_prop!(decl, usize, tickeys);
 				decl_prop!(decl, id, filterList);
 				decl_prop!(decl, i32, filterListMode);
+				decl_prop!(decl, id, statusItem);
+
+				decl.add_method(sel!(menu_open_settings:), Self::menu_open_settings as extern fn(&mut Object, Sel, id));
+				decl.add_method(sel!(menu_quit:), Self::menu_quit as extern fn(&mut Object, Sel, id));
 			}
 
 			decl.register();
@@ -171,6 +175,10 @@ trait AppDelegate // <NSApplicationDelegate>
 
 	extern fn applicationDidFinishLaunching(this: &mut Object, _cmd: Sel, note: id)
 	{
+		// 菜单栏图标第一个装上：这样即便后面卡在辅助功能授权弹窗上，
+		// 用户也能看到程序确实起来了、并且能从菜单里退出。
+		Self::install_status_item(this);
+
 		Self::request_ax();
 		Self::begin_check_update(this, &nsstring_to_string(l10n_str("check_update_url")));
 
@@ -223,13 +231,14 @@ trait AppDelegate // <NSApplicationDelegate>
 
 	extern fn applicationDidBecomeActive(this: &mut Object, _cmd: Sel, note: id)
 	{
-		unsafe 
-		{
-			if !RUNNING { return; }
-		}
-
-		println!("applicationDidBecomeActive");
-		Self::show_settings(this);
+		// 这里**故意不自动弹设置窗口**。
+		//
+		// 上游的实现在每次 app 变成活跃时就 show_settings，因为它是纯后台 agent，
+		// 几乎不会被动激活。但本构建有菜单栏图标、还会在授权后自我重启，自动弹窗
+		// 会反复把焦点从用户正在用的程序（比如浏览器输入框）抢走。
+		// 设置窗口改成只由用户主动打开：菜单栏图标里的"打开设置"，或按 QAZ123。
+		let _ = (this, note);
+		println!("applicationDidBecomeActive (不自动开设置窗口)");
 	}
 
 	extern fn applicationWillTerminate(this: &mut Object, _cmd: Sel, _note: id)
@@ -329,6 +338,76 @@ trait AppDelegate // <NSApplicationDelegate>
 			}
 		}
 
+	}
+
+	// ===== 菜单栏（状态栏）图标 =====
+	//
+	// 上游 0.5.0 是个没有任何可见界面的后台程序：只能靠弹通知和按 QAZ123 打开设置，
+	// 用户根本判断不出它有没有在运行。这里补上一个菜单栏图标，行为对齐 1.1.0。
+
+	extern fn menu_open_settings(this: &mut Object, _cmd: Sel, _sender: id)
+	{
+		println!("menu: open settings");
+		unsafe
+		{
+			// 即使作为 agent 运行，也把设置窗口带到最前面
+			let _: id = msg_send![NSApp(), activateIgnoringOtherApps: 1i8];
+		}
+		Self::show_settings(this);
+	}
+
+	extern fn menu_quit(_this: &mut Object, _cmd: Sel, _sender: id)
+	{
+		println!("menu: quit");
+		app_terminate();
+	}
+
+	fn install_status_item(this: &mut Object)
+	{
+		unsafe
+		{
+			let status_bar: id = msg_send![class("NSStatusBar"), systemStatusBar];
+			// NSVariableStatusItemLength == -1.0
+			let item: id = msg_send![status_bar, statusItemWithLength: -1.0f64];
+
+			let icon_path = get_res_path("menubar.png");
+			let image: id = msg_send![class("NSImage"), alloc];
+			let image: id = msg_send![image, initWithContentsOfFile: nsstr(&icon_path)];
+			if image != nil
+			{
+				let _: id = msg_send![item, setImage: image];
+			}
+
+			let button: id = msg_send![item, button];
+			if button != nil
+			{
+				let _: id = msg_send![button, setToolTip: l10n_str("menu_tooltip")];
+			}
+
+			let menu: id = msg_send![class("NSMenu"), new];
+
+			let open_item: id = msg_send![class("NSMenuItem"), alloc];
+			let open_item: id = msg_send![open_item,
+				initWithTitle: l10n_str("menu_open_settings")
+				action: sel!(menu_open_settings:)
+				keyEquivalent: nsstr("")];
+			let _: id = msg_send![open_item, setTarget: this as *mut Object];
+			let _: id = msg_send![menu, addItem: open_item];
+
+			let quit_item: id = msg_send![class("NSMenuItem"), alloc];
+			let quit_item: id = msg_send![quit_item,
+				initWithTitle: l10n_str("menu_quit")
+				action: sel!(menu_quit:)
+				keyEquivalent: nsstr("")];
+			let _: id = msg_send![quit_item, setTarget: this as *mut Object];
+			let _: id = msg_send![menu, addItem: quit_item];
+
+			let _: id = msg_send![item, setMenu: menu];
+
+			// 存一份引用，免得被回收
+			let _: id = msg_send![this, setStatusItem: item];
+			println!("install_status_item: done");
+		}
 	}
 
 	fn show_noti(title: id, msg: id)
@@ -474,43 +553,47 @@ trait AppDelegate // <NSApplicationDelegate>
 				return; 
 			}
 
-			// Ask the system to offer opening System Settings. This must happen exactly
-			// once: AXIsProcessTrustedWithOptions(prompt: true) is what raises the system
-			// prompt, and the old code called it on every loop iteration.
-			let _ = is_enabled(true);
-
-			// Tell the user where to click -- once.
+			// 这里**故意不调用** is_enabled(true)。
 			//
-			// The old code wrapped this alert in `while !is_enabled(true) { ... continue }`,
-			// so pressing "继续" immediately re-opened the very same alert. The user was
-			// nagged in an endless loop with no chance to reach System Settings and tick
-			// the box. Never re-post this alert.
-			let alert:id = msg_send![class("NSAlert"), new];
-			alert.autorelease();
-			let _:id = msg_send![alert, setMessageText: l10n_str("ax_tip")];
-			let _:id = msg_send![alert, addButtonWithTitle: l10n_str("quit")];
-			let _:id = msg_send![alert, addButtonWithTitle: l10n_str("doneWithThis")];
+			// AXIsProcessTrustedWithOptions(prompt: true) 会弹出系统自己的授权询问框，
+			// 而紧接着我们又弹出下面这个 NSAlert —— 两个模态框叠在一起抢焦点，
+			// 用户点哪个都"没反应"（实测截图确认过）。只留一个框，用户照着文字去
+			// 系统设置里勾选即可，勾完回来点"继续"。
+			//
+			// 也不要在这里放 sleep/轮询：那会占死主线程，整个 app 变成一块石头，
+			// 连 Dock 和 Cmd-Q 都按不动（那是上一版的错误尝试）。
 
-			let btn:i32 = msg_send![alert, runModal];
-			println!("request_ax alert: {}", btn);
-			if btn == 1000
+			// Report where to click, then wait for the user -- with a modal alert, not
+			// with a busy loop.
+			//
+			// A previous attempt polled `loop { if is_enabled(false) { break }
+			// thread::sleep_ms(500) }` after this alert. That blocks the main thread,
+			// which kills the app's event loop: the process stays alive but the UI is
+			// frozen and it cannot even be quit. The alert below is modal, so it is the
+			// app's own (responsive) UI and it does NOT block System Settings -- the
+			// user can grant the permission and then come back and click "继续".
+			//
+			// Do not put a sleep/poll loop on the main thread here.
+			while !is_enabled(false)
 			{
-				app_terminate();
-				return;
-			}
+				let alert:id = msg_send![class("NSAlert"), new];
+				alert.autorelease();
+				let _:id = msg_send![alert, setMessageText: l10n_str("ax_tip")];
+				let _:id = msg_send![alert, addButtonWithTitle: l10n_str("quit")];
+				let _:id = msg_send![alert, addButtonWithTitle: l10n_str("doneWithThis")];
 
-			// Wait quietly for the grant to land instead of asking again -- asking again
-			// does not help. macOS only applies a newly granted Accessibility permission
-			// to a *newly launched* process, which is why we relaunch once it is in.
-			println!("request_ax: waiting for accessibility permission (grant it in System Settings > Privacy & Security > Accessibility)");
-			loop
-			{
-				if is_enabled(false)
+				let btn:i32 = msg_send![alert, runModal];
+				println!("request_ax alert: {}", btn);
+				if btn == 1000
 				{
-					break;
+					app_terminate();
+					return;
 				}
-				thread::sleep_ms(500);
 			}
+
+			// macOS only applies a freshly granted Accessibility permission to a newly
+			// launched process, so restart ourselves now that it is in.
+			println!("request_ax: granted, relaunching");
 			println!("request_ax: accessibility granted, relaunching");
 
 			app_relaunch_self();
