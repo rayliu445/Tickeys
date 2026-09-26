@@ -256,7 +256,15 @@ impl AudioData
 	//todo: how to handle error?
 	pub fn from_file(file: &str) -> AudioData
 	{
-		let file_ptr = std::ffi::CString::new(file).unwrap().as_ptr();
+		// The CString must be bound to a named local, NOT written inline as
+		// `CString::new(file).unwrap().as_ptr()`: that makes the CString a temporary
+		// which is dropped at the end of the statement, so `file_ptr` would dangle.
+		// The allocator overwrites the first bytes of the freed chunk with free-list
+		// pointers, so ALUT receives a garbled path and fails with
+		// ALUT_ERROR_IO_ERROR (526) -- which is exactly why startup panicked with
+		// "failed to load file [526]" on the very first scheme.
+		let file_c = std::ffi::CString::new(file).unwrap();
+		let file_ptr = file_c.as_ptr();
 		let mut audio = AudioData{buffer:0};
 		unsafe
 		{

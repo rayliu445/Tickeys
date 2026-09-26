@@ -6,6 +6,9 @@
 修正：程序完全没有代码签名，导致辅助功能授权无法生效（勾了也没用）
 修改：bundle id 改为 com.yingDev.Tickeys.SwitchPacks，避免与 1.1.0 的授权记录冲突
 修改：LSUIElement 改为 false，程序在 Dock 里可见（原先完全无界面提示）
+修正：加载音效时读了已释放的内存，导致启动必崩。CString 被当成临时值提前析构，
+      as_ptr() 返回野指针，alut 拿到乱码路径报 ALUT_ERROR_IO_ERROR(526)，
+      在加载第一个音效文件时就 panic。表现是"双击后没反应"
 
 0.5.0
 增加“爆裂鼓手”音效
