@@ -24,7 +24,8 @@ impl Pref {
 
         let pref_exists: Option<Retained<NSString>> = unsafe {
             let key = cocoa_util::nsstr("pref_exists");
-            msg_send![&defaults, stringForKey: &*key]
+            let r: Option<Retained<NSString>> = msg_send![&defaults, stringForKey: &*key];
+            r
         };
         if pref_exists.is_none() {
             // first run
@@ -32,18 +33,20 @@ impl Pref {
             p.save();
             return p;
         }
-
         let audio_scheme: Option<Retained<NSString>> = unsafe {
             let key = cocoa_util::nsstr("audio_scheme");
-            msg_send![&defaults, stringForKey: &*key]
+            let r: Option<Retained<NSString>> = msg_send![&defaults, stringForKey: &*key];
+            r
         };
         let volume: f32 = unsafe {
             let key = cocoa_util::nsstr("volume");
-            msg_send![&defaults, floatForKey: &*key]
+            let r: f32 = msg_send![&defaults, floatForKey: &*key];
+            r
         };
         let pitch: f32 = unsafe {
             let key = cocoa_util::nsstr("pitch");
-            msg_send![&defaults, floatForKey: &*key]
+            let r: f32 = msg_send![&defaults, floatForKey: &*key];
+            r
         };
 
         let mut scheme_str = audio_scheme
@@ -54,7 +57,6 @@ impl Pref {
         if !schemes.iter().any(|s| s.name == scheme_str) {
             scheme_str = default.scheme;
         }
-
         Pref {
             scheme: scheme_str,
             volume,

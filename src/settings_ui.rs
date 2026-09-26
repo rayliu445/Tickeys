@@ -230,6 +230,37 @@ define_class!(
             }
         }
 
+        // ===== NIB outlet setters =====
+        // The 2015 Settings.nib connects outlets to File's Owner via KVC
+        // (setValue:forKey:), which dispatches to these setters. Without them
+        // the outlets stay nil: the popup keeps the NIB's default
+        // "Item 1/2/3" rows and the sliders/labels are dead.
+
+        #[unsafe(method(setPopup_audio_scheme:))]
+        fn set_popup_audio_scheme(&self, v: Id) {
+            self.ivars().popup_audio_scheme.set(v);
+        }
+
+        #[unsafe(method(setSlide_volume:))]
+        fn set_slide_volume(&self, v: Id) {
+            self.ivars().slide_volume.set(v);
+        }
+
+        #[unsafe(method(setSlide_pitch:))]
+        fn set_slide_pitch(&self, v: Id) {
+            self.ivars().slide_pitch.set(v);
+        }
+
+        #[unsafe(method(setLabel_version:))]
+        fn set_label_version(&self, v: Id) {
+            self.ivars().label_version.set(v);
+        }
+
+        #[unsafe(method(setFilterListTable:))]
+        fn set_filter_list_table(&self, v: Id) {
+            self.ivars().filter_list_table.set(v);
+        }
+
         #[unsafe(method(numberOfRowsInTableView:))]
         fn number_of_rows(&self, _table_view: Id) -> isize {
             unsafe {

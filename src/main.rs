@@ -17,25 +17,25 @@ use objc2::define_class;
 use objc2::msg_send;
 use objc2::rc::Retained;
 use objc2::runtime::{NSObject, NSObjectProtocol};
+use objc2_app_kit::{NSAlert, NSApplicationDelegate, NSImage, NSMenu, NSMenuItem, NSStatusBar};
+use objc2_foundation::{NSString, NSUserDefaults};
 use objc2::sel;
 use objc2::runtime::ProtocolObject;
 use objc2::DefinedClass;
 use objc2::MainThreadOnly;
 use objc2::AnyThread;
-use objc2_app_kit::{NSAlert, NSApplicationDelegate, NSImage, NSMenu, NSMenuItem, NSStatusBar};
-use objc2_foundation::{NSString, NSUserDefaults};
-
-use crate::cocoa_util::{Id, NIL};
-use crate::consts::OPEN_SETTINGS_KEY_SEQ;
-use crate::pref::Pref;
-use crate::settings_ui::SettingsController;
-use crate::tickeys::Tickeys;
 
 extern "C" {
     static NSWorkspaceDidActivateApplicationNotification: Id;
     static NSWorkspaceDidWakeNotification: Id;
     static NSWorkspaceApplicationKey: Id;
 }
+
+use crate::cocoa_util::{Id, NIL};
+use crate::consts::OPEN_SETTINGS_KEY_SEQ;
+use crate::pref::Pref;
+use crate::settings_ui::SettingsController;
+use crate::tickeys::Tickeys;
 
 #[derive(Default)]
 pub struct AppDelegateIvars {
@@ -55,7 +55,7 @@ define_class!(
     impl AppDelegate {
         #[unsafe(method(applicationDidFinishLaunching:))]
         fn application_did_finish_launching(&self, _note: Id) {
-            // 菜单栏图标第一个装上：这样即便后面卡在辅助功能授权弹窗上，
+                    // 菜单栏图标第一个装上：这样即便后面卡在辅助功能授权弹窗上，
             // 用户也能看到程序确实起来了、并且能从菜单里退出。
             Self::install_status_item(self);
 
@@ -255,10 +255,17 @@ impl AppDelegate {
             let defaults = NSUserDefaults::standardUserDefaults();
             let key = NSString::from_str("FilterList");
             let stored: Id = msg_send![&defaults, objectForKey: &*key];
+            // alloc+init = +1 owned (NOT autoreleased!): convenience methods
+            // like arrayWithCapacity: return pool-owned objects, and the pool
+            // created before NSApplication::run() drains -- leaving ivars
+            // pointing at freed memory (crash in check_and_apply_mute...).
             let list: Id = if stored.is_null() {
-                msg_send![class!(NSMutableArray), arrayWithCapacity: 8usize]
+                let arr: Id = msg_send![class!(NSMutableArray), alloc];
+                msg_send![arr, init]
             } else {
-                msg_send![class!(NSMutableArray), arrayWithArray: stored]
+                let arr: Id = msg_send![class!(NSMutableArray), alloc];
+                let _: () = msg_send![arr, initWithArray: stored];
+                arr
             };
             inst.ivars().filter_list.set(list);
 
@@ -338,6 +345,9 @@ impl AppDelegate {
 
             let _: () = msg_send![item, setMenu: &*menu];
 
+            // statusItemWithLength: returns an autoreleased item; retain it so
+            // the menu-bar icon survives past the current autorelease pool.
+            let _: () = msg_send![item, retain];
             // store a reference so the item is not reclaimed
             this.ivars().status_item.set(item);
             println!("install_status_item: done");

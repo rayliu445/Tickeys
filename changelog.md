@@ -1,6 +1,22 @@
 未发布
 1.0.0 —— 现代化重写：Apple Silicon 原生 + 可交付版本
 
+实测修复（本机验收通过）
+- 修复 macOS 15 上音效加载必崩：Apple 移除了 AVAudioPlayer 的
+  initWithContentsOfFile:error:（ObjC 层），改用 initWithData:error:
+  先把 wav 读入内存再初始化（附带降低首次播放延迟）
+- 修复设置窗口控件全部失灵：重写时漏掉了 NIB 回填 outlet 所需的
+  setPopup_audio_scheme: 等 5 个 setter，导致下拉框停留在 NIB 默认的
+  "Item 1/2/3" 占位项、音量条无效
+- 修复菜单栏图标/黑名单数组"自动释放后悬垂"：arrayWithCapacity: 等
+  便利方法返回池子持有的对象，在 app_run 前的 autorelease pool 排空时
+  被释放，随后访问即崩。改为 alloc/init 持有 + 显式 retain
+- 签名方案落定为专用钥匙串（tickeys-signing）：证书+私钥+分区权限
+  全部脚本化配置，codesign 不再弹任何确认框；build.sh 按证书哈希
+  精确签名，避免同名证书歧义
+- 实测验收：构建 → 安装 → 授权一次 → 再次构建替换 → 启动
+  无需重新授权，直接可用
+
 架构
 - 整体重写到现代 Rust（2021 edition）+ objc2 0.6：替换 2015 年的
   objc 0.1.8 / cocoa 0.2 / rustc-serialize / openal-rs 等依赖，

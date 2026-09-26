@@ -15,7 +15,14 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-IDENTITY="${SIGN_IDENTITY:-Tickeys Local}"
+# Resolve the identity HASH (not the name) -- avoids ambiguity when several
+# keychains contain a certificate with the same common name.
+IDENTITY="${SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null \
+    | grep -F '"Tickeys Local"' | head -1 | awk '{print $2}')}"
+if [ -z "$IDENTITY" ]; then
+    echo "❌ no signing identity found. Run scripts/setup-signing.sh first." >&2
+    exit 1
+fi
 INSTALL=0
 [ "${1:-}" = "--install" ] && INSTALL=1
 
@@ -34,7 +41,13 @@ VERSION="$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)"
 plutil -replace CFBundleShortVersionString -string "$VERSION" "$APP/Contents/Info.plist"
 plutil -replace CFBundleVersion -string "$VERSION" "$APP/Contents/Info.plist"
 
-echo "==> code signing with identity \"$IDENTITY\""
+# 解锁专用签名钥匙串，避免 codesign 弹密码框
+SIGN_KC="$HOME/Library/Keychains/tickeys-signing.keychain-db"
+if [ -f "$SIGN_KC" ]; then
+    security unlock-keychain -p tickeys-local "$SIGN_KC" 2>/dev/null || true
+fi
+
+echo "==> code signing with certificate $IDENTITY"
 codesign --force --sign "$IDENTITY" "$APP"
 codesign --verify --verbose=1 "$APP"
 
