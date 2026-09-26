@@ -225,6 +225,13 @@ trait AppDelegate // <NSApplicationDelegate>
 	    	let frontApp: id = msg_send![workspace, frontmostApplication];
 			Self::check_and_apply_mute_for_app(this, nsurl_filename(msg_send![frontApp, bundleURL]));
 
+		// 启动完成后把设置窗口显示出来 —— 这是唯一能让用户“看见程序开了”的反馈。
+		//
+		// 本程序是纯菜单栏程序（LSUIElement=true，不占 Dock）。如果启动后什么都不弹，
+		// 用户双击之后会觉得“根本没反应”（实测踩过这个坑）。只在启动时显示这一次；
+		// applicationDidBecomeActive 里不显示，避免反复抢走其它程序的焦点。
+		Self::show_settings(this);
+
 		}
 
 	}
