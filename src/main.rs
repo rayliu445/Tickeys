@@ -405,7 +405,15 @@ impl AppDelegate {
     fn request_ax() {
         println!("request_ax");
         unsafe {
-            if is_accessibility_trusted(false) {
+            // AXIsProcessTrusted(): no-options variant, used as a cross-check
+            // against AXIsProcessTrustedWithOptions to tell apart "system
+            // really says no" from "our options dictionary is broken".
+            let plain: u8 = AXIsProcessTrusted();
+            println!("request_ax: AXIsProcessTrusted() = {}", plain != 0);
+            println!("request_ax: WithOptions(false) = {}", is_accessibility_trusted(false));
+
+            if is_accessibility_trusted(false) || plain != 0 {
+                println!("request_ax: trusted, continuing");
                 return;
             }
 
@@ -434,6 +442,11 @@ impl AppDelegate {
             cocoa_util::app_relaunch_self();
         }
     }
+}
+
+#[link(name = "ApplicationServices", kind = "framework")]
+extern "C" {
+    fn AXIsProcessTrusted() -> u8;
 }
 
 unsafe fn is_accessibility_trusted(prompt: bool) -> bool {
