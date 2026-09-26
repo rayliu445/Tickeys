@@ -10,7 +10,7 @@ libc = "0.2.1"
 cocoa = "0.2.2"
 time = "0.1.33"
 objc = "0.1.8"
-hyper = "0.7.2"
+hyper = { version = "0.7.2", default-features = false }
 block = "0.1.4"
 rustc-serialize = "0.3.16"
 openal-rs = "0.1.1"
