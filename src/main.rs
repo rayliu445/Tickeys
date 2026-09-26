@@ -232,10 +232,22 @@ trait AppDelegate // <NSApplicationDelegate>
 		Self::show_settings(this);
 	}
 
-	extern fn applicationWillTerminate(this: &mut Object, _cmd: Sel, note: id)
+	extern fn applicationWillTerminate(this: &mut Object, _cmd: Sel, _note: id)
 	{
-		//let it drop
-		let tickeys: Box<Tickeys> = unsafe { msg_send![this, tickeys] };
+		// Let the Tickeys instance drop -- but only if one was actually created.
+		//
+		// `setTickeys:` happens near the end of applicationDidFinishLaunching, whereas
+		// request_ax() runs at the very beginning and its "quit" button calls
+		// [NSApp terminate:]. Terminating from there lands us here while the ivar is
+		// still NULL; rebuilding a Box from NULL and dropping it segfaults
+		// (EXC_BAD_ACCESS at 0x18 inside drop_in_place).
+		let ptr: usize = unsafe { msg_send![this, tickeys] };
+		if ptr == 0
+		{
+			println!("applicationWillTerminate: no Tickeys instance yet, nothing to drop");
+			return;
+		}
+		unsafe { drop(Box::from_raw(ptr as *mut Tickeys)); }
 	}
 
 	extern fn userNotificationCenterDidActivateNotification(this: &mut Object, _cmd: Sel, center: id, note: id)
@@ -461,24 +473,45 @@ trait AppDelegate // <NSApplicationDelegate>
 				RUNNING = true;
 				return; 
 			}
-			
-			while !is_enabled(true)
-			{
-				let alert:id = msg_send![class("NSAlert"), new];
-				alert.autorelease();
-				let _:id = msg_send![alert, setMessageText: l10n_str("ax_tip")];
-				let _:id = msg_send![alert, addButtonWithTitle: l10n_str("quit")];
-				let _:id = msg_send![alert, addButtonWithTitle: l10n_str("doneWithThis")];
 
-				let btn:i32 = msg_send![alert, runModal];
-				println!("request_ax alert: {}", btn);
-				match btn
-				{
-					1001 => continue,
-					1000 => app_terminate(),
-					_ => panic!("request_ax")
-				}
+			// Ask the system to offer opening System Settings. This must happen exactly
+			// once: AXIsProcessTrustedWithOptions(prompt: true) is what raises the system
+			// prompt, and the old code called it on every loop iteration.
+			let _ = is_enabled(true);
+
+			// Tell the user where to click -- once.
+			//
+			// The old code wrapped this alert in `while !is_enabled(true) { ... continue }`,
+			// so pressing "继续" immediately re-opened the very same alert. The user was
+			// nagged in an endless loop with no chance to reach System Settings and tick
+			// the box. Never re-post this alert.
+			let alert:id = msg_send![class("NSAlert"), new];
+			alert.autorelease();
+			let _:id = msg_send![alert, setMessageText: l10n_str("ax_tip")];
+			let _:id = msg_send![alert, addButtonWithTitle: l10n_str("quit")];
+			let _:id = msg_send![alert, addButtonWithTitle: l10n_str("doneWithThis")];
+
+			let btn:i32 = msg_send![alert, runModal];
+			println!("request_ax alert: {}", btn);
+			if btn == 1000
+			{
+				app_terminate();
+				return;
 			}
+
+			// Wait quietly for the grant to land instead of asking again -- asking again
+			// does not help. macOS only applies a newly granted Accessibility permission
+			// to a *newly launched* process, which is why we relaunch once it is in.
+			println!("request_ax: waiting for accessibility permission (grant it in System Settings > Privacy & Security > Accessibility)");
+			loop
+			{
+				if is_enabled(false)
+				{
+					break;
+				}
+				thread::sleep_ms(500);
+			}
+			println!("request_ax: accessibility granted, relaunching");
 
 			app_relaunch_self();
 		}

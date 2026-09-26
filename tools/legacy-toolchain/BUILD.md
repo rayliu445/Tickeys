@@ -105,13 +105,32 @@ mkdir -p Tickeys.app/Contents/MacOS
 cp target/release/Tickeys Tickeys.app/Contents/MacOS/
 rm -rf Tickeys.app/Contents/SharedSupport
 cp -r SharedSupport Tickeys.app/Contents/
+
+# 5. 签名 —— 必须做，别跳过
 ```
+
+### 坑 4：不签名的话，辅助功能授权根本粘不住
+
+macOS 用代码签名来稳定标识一个 app。**完全没签名的 app，在"辅助功能"里勾上了也没用** ——
+`AXIsProcessTrusted` 照样返回 false，程序永远卡在授权弹窗上。表现就是"权限给了，还是打不开"。
+
+上游的 `build-product.sh` 里本来就有 `codesign --force --sign "Developer ID Application: ..."`，
+永远会签。没有 Developer ID 证书时，**至少要做 ad-hoc 签名**（从内到外）：
+
+```sh
+codesign --force --sign - Tickeys.app/Contents/SharedSupport/libalut.0.dylib
+codesign --force --sign - Tickeys.app
+codesign -dv Tickeys.app        # 应该显示 Signature=adhoc
+```
+
+ad-hoc 签名的 cdhash 会随二进制内容变化，所以**每次重新编译后都要重新在系统设置里
+授权一次**（把旧条目删掉再加）。有 Developer ID 就用它签，身份才跨构建稳定。
 
 ---
 
 ## 已知限制
 
 - **只能出 x86_64**。老工具链没有 `aarch64-apple-darwin`。二进制在 Apple Silicon 上走 Rosetta，和仓库里那份 `SharedSupport/libalut.0.dylib`（也是 x86_64）一致。想原生 arm64 + 去掉这个 dylib，只能走代码现代化那条路。
-- **产物没有签名**。自己机器上要右键打开；辅助功能权限需要重新授权。要分发得有自己的 Developer ID 证书。
+- **只能 ad-hoc 签名**（见坑 4）。没有 Developer ID 就没法公证，分发给别人时对方要右键打开；而且每次重编都要重新授权辅助功能。
 - **构建环境很重**：工具链约 120MB，crates.io git 索引约 800MB。
 - **这套配方很脆**：依赖一个 2017 年的编译器、一个链接器包装脚本、三个被打补丁的第三方 crate。它能用，但这不是"修好了"，只是"能编出来了"。真正的修法是把手写 FFI 现代化。

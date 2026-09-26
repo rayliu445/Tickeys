@@ -11,7 +11,7 @@
 	<key>CFBundleIconFile</key>
 	<string>tickeys</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.yingDev.Tickeys</string>
+	<string>com.yingDev.Tickeys.SwitchPacks</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundlePackageType</key>
@@ -37,7 +37,7 @@
 	<key>LSMultipleInstancesProhibited</key>
 	<true/>
 	<key>LSUIElement</key>
-	<true/>
+	<false/>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 </dict>
